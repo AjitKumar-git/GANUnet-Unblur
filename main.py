@@ -1,12 +1,12 @@
 import torch
 import argparse
 from torch.utils.data import DataLoader
-from models import Generator, Discriminator  # Assuming your models are in a 'models.py' file
+from models import Generator, Discriminator, load_trained_models  # Import models and harmonized loader
 from training.train_utils import train_discriminator, train_generator, save_models  # Import functions from train_utils.py
 from visualization.display_utils import save_generated_images  # Import the display function
 from datasets.dataset_loader import load_dataset, visualize_dataset  # Import from dataset_loader.py
 
-def train_gan(generator, discriminator, dataloader, num_epochs, lr, beta1, beta2, device, model_dir="models"):
+def train_gan(generator, discriminator, dataloader, num_epochs, lr, beta1, beta2, device, model_dir="models", save_interval=10):
     # Define the loss function
     adversarial_loss = torch.nn.BCELoss()
 
@@ -16,6 +16,8 @@ def train_gan(generator, discriminator, dataloader, num_epochs, lr, beta1, beta2
 
     # Start training loop
     for epoch in range(num_epochs):
+        generator.train()
+        discriminator.train()
         for i, batch in enumerate(dataloader):
             blurred_images = batch[0].to(device)
             sharp_images = batch[1].to(device)
@@ -28,39 +30,28 @@ def train_gan(generator, discriminator, dataloader, num_epochs, lr, beta1, beta2
             # Train generator
             total_g_loss = train_generator(optimizer_G, generator, discriminator, blurred_images, sharp_images, adversarial_loss, device)
 
-            if (i + 1) % 100 == 0:
+            if (i + 1) % 100 == 0 or (i + 1) == len(dataloader):
                 print(
                     f"Epoch [{epoch+1}/{num_epochs}] Batch {i+1}/{len(dataloader)} "
                     f"Discriminator Loss: {d_loss.item():.4f} "
                     f"Generator Loss: {total_g_loss.item():.4f}"
                 )
 
-        # Save generated images and models for every epoch
-        if (epoch + 1) % 10 == 0:
+        # Save generated images and models at specified interval
+        if (epoch + 1) % save_interval == 0 or (epoch + 1) == num_epochs:
             save_generated_images(generator, blurred_images, epoch, device)
-            save_models(generator, discriminator, epoch, model_dir)
+            save_models(generator, discriminator, epoch, model_dir, save_interval=save_interval)
 
     print("Training completed!")
 
-def process_images(generator, dataloader, device):
+def process_images(generator, dataloader, device, output_dir="generated_images"):
     generator.eval()  # Set the generator to evaluation mode
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
             blurred_images = batch[0].to(device)
-            
-            # Generate images using the trained generator
-            generated_images = generator(blurred_images)
-
-            # Save the processed images
-            save_generated_images(generator, blurred_images, i, device)
+            save_generated_images(generator, blurred_images, i, device, save_dir=output_dir)
 
     print("Image processing completed!")
-
-def load_trained_models(generator, discriminator, model_dir, epoch):
-    # Load the trained model states
-    generator.load_state_dict(torch.load(f"{model_dir}/generator_epoch_{epoch}.pth"))
-    discriminator.load_state_dict(torch.load(f"{model_dir}/discriminator_epoch_{epoch}.pth"))
-    print(f"Models loaded for epoch {epoch}")
 
 if __name__ == "__main__":
     # Set up argument parser
@@ -72,6 +63,7 @@ if __name__ == "__main__":
     parser.add_argument('--sharp_folder', help="Folder containing sharp images (for 'two_folder')")
     parser.add_argument('--gt_folder', help="Folder containing ground truth images (for 'real_blur')")
     parser.add_argument('--model_dir', default='models', help="Directory where models are saved")
+    parser.add_argument('--save_interval', type=int, default=10, help="Epoch interval to save models and generated images")
     parser.add_argument('--num_epochs', type=int, default=100, help="Number of epochs for training")
     parser.add_argument('--batch_size', type=int, default=2, help="Batch size")
     parser.add_argument('--image_size', type=lambda s: tuple(map(int, s.split(','))), default=(256, 256), help="Image size as a tuple (e.g., 256,256)")
@@ -79,6 +71,7 @@ if __name__ == "__main__":
     parser.add_argument('--beta1', type=float, default=0.5, help="Beta1 for Adam optimizer")
     parser.add_argument('--beta2', type=float, default=0.999, help="Beta2 for Adam optimizer")
     parser.add_argument('--epoch', type=int, help="Epoch to load for image processing mode")
+    parser.add_argument('--visualize', action='store_true', help="Visualize dataset sample images")
 
     # Parse arguments
     args = parser.parse_args()
@@ -96,11 +89,12 @@ if __name__ == "__main__":
         image_size=args.image_size
     )
 
-    # Visualize dataset if needed (optional, for debugging)
-    visualize_dataset(dataset, num_samples=5)
+    # Visualize dataset if requested
+    if args.visualize:
+        visualize_dataset(dataset, num_samples=5)
 
     # Create DataLoader
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=(args.mode == 'train'))
 
     # Initialize models
     generator = Generator().to(device)
@@ -108,13 +102,13 @@ if __name__ == "__main__":
 
     if args.mode == 'train':
         # Train the GAN
-        train_gan(generator, discriminator, dataloader, args.num_epochs, args.lr, args.beta1, args.beta2, device, args.model_dir)
+        train_gan(generator, discriminator, dataloader, args.num_epochs, args.lr, args.beta1, args.beta2, device, args.model_dir, save_interval=args.save_interval)
 
     elif args.mode == 'process':
         # Load the trained models
         if args.epoch is None:
             print("Error: --epoch must be provided in 'process' mode")
         else:
-            load_trained_models(generator, discriminator, args.model_dir, args.epoch)
+            load_trained_models(generator=generator, discriminator=None, model_dir=args.model_dir, epoch=args.epoch, device=device)
             # Process images using the trained generator
             process_images(generator, dataloader, device)

@@ -46,7 +46,14 @@ def visualize_dataset(dataset, num_samples=5):
         dataset: The dataset to visualize.
         num_samples (int): Number of samples to visualize.
     """
+    if len(dataset) == 0:
+        print("Dataset is empty.")
+        return
+
+    num_samples = min(num_samples, len(dataset))
     fig, axes = plt.subplots(1, num_samples, figsize=(15, 5))
+    if num_samples == 1:
+        axes = [axes]
     
     for i in range(num_samples):
         blurred_img, sharp_img = dataset[i]
@@ -56,8 +63,8 @@ def visualize_dataset(dataset, num_samples=5):
         sharp_img = sharp_img.permute(1, 2, 0).numpy()
 
         # Normalize the images back to [0, 1]
-        blurred_img = (blurred_img - blurred_img.min()) / (blurred_img.max() - blurred_img.min())
-        sharp_img = (sharp_img - sharp_img.min()) / (sharp_img.max() - sharp_img.min())
+        blurred_img = (blurred_img * 0.5 + 0.5)
+        sharp_img = (sharp_img * 0.5 + 0.5)
 
         # Plot the images
         axes[i].imshow(blurred_img)
